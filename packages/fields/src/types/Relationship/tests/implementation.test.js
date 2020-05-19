@@ -386,7 +386,6 @@ describe('Type Generation', () => {
 describe('Referenced list errors', () => {
   const mockList = {
     // ie; "not found"
-    getFieldByPath: () => {},
     getGraphqlFilterFragment: () => [],
     gqlNames: {
       whereInputName: '',
