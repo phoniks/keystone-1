@@ -22,7 +22,7 @@ const {
 const { SessionManager } = require('@keystonejs/session');
 const { AppVersionProvider, appVersionMiddleware } = require('@keystonejs/app-version');
 
-const { List } = require('../ListTypes');
+const { List, Singleton } = require('../ListTypes');
 const { DEFAULT_DIST_DIR } = require('../../constants');
 const { CustomProvider, ListAuthProvider, ListCRUDProvider } = require('../providers');
 const { formatError } = require('./format-error');
@@ -254,7 +254,15 @@ module.exports = class Keystone {
     return strategy;
   }
 
-  createList(key, config, { isAuxList = false } = {}) {
+  createList(key, config, options) {
+    return this._createList(List, key, config, options);
+  }
+
+  createSingleton(key, config, options) {
+    return this._createList(Singleton, key, config, options);
+  }
+
+  _createList(listClass, key, config, { isAuxList = false } = {}) {
     const { getListByKey, adapters } = this;
     const adapterName = config.adapterName || this.defaultAdapter;
     const isReservedName = !isAuxList && key[0] === '_';
@@ -263,29 +271,24 @@ module.exports = class Keystone {
       throw new Error(`Invalid list name "${key}". List names cannot start with an underscore.`);
     }
 
-    // composePlugins([f, g, h])(o, e) = h(g(f(o, e), e), e)
-    const composePlugins = fns => (o, e) => fns.reduce((acc, fn) => fn(acc, e), o);
+    const list = new listClass(key, compose(config.plugins || [])(config), {
+      getListByKey,
+      queryHelper: this._buildQueryHelper.bind(this),
+      adapter: adapters[adapterName],
+      defaultAccess: this.defaultAccess,
+      registerType: type => this.registeredTypes.add(type),
+      isAuxList,
+      createAuxList: (auxKey, auxConfig) => {
+        if (isAuxList) {
+          throw new Error(
+            `Aux list "${key}" shouldn't be creating more aux lists ("${auxKey}"). Something's probably not right here.`
+          );
+        }
+        return this.createList(auxKey, auxConfig, { isAuxList: true });
+      },
+      schemaNames: this._schemaNames,
+    });
 
-    const list = new List(
-      key,
-      composePlugins(config.plugins || [])(config, { listKey: key, keystone: this }),
-      {
-        getListByKey,
-        adapter: adapters[adapterName],
-        defaultAccess: this.defaultAccess,
-        registerType: type => this.registeredTypes.add(type),
-        isAuxList,
-        createAuxList: (auxKey, auxConfig) => {
-          if (isAuxList) {
-            throw new Error(
-              `Aux list "${key}" shouldn't be creating more aux lists ("${auxKey}"). Something's probably not right here.`
-            );
-          }
-          return this.createList(auxKey, auxConfig, { isAuxList: true });
-        },
-        schemaNames: this._schemaNames,
-      }
-    );
     this.lists[key] = list;
     this.listsArray.push(list);
     this._listCRUDProvider.lists.push(list);
